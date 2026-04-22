@@ -1,0 +1,290 @@
+import Student from "../models/Student.js";
+import Parent from "../models/Parent.js";
+import Teacher from "../models/Teacher.js";
+
+// POST /admin/add-student
+export const addStudent = async (req, res) => {
+  try {
+    let { name, rollNo, className, parentName, parentEmail, parentPassword, mentorEmail } = req.body;
+
+    // Trim whitespace
+    name = name?.trim();
+    rollNo = rollNo?.trim();
+    className = className?.trim();
+    parentName = parentName?.trim();
+    parentEmail = parentEmail?.trim();
+    parentPassword = parentPassword?.trim();
+    mentorEmail = mentorEmail?.trim();
+
+    if (!name || !rollNo || !className || !parentName || !parentEmail || !parentPassword || !mentorEmail) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+
+    // Check if student already exists
+    const existingStudent = await Student.findOne({ rollNo });
+    if (existingStudent) {
+      return res.status(400).json({ message: "Student with this roll number already exists" });
+    }
+
+    // Check if mentor/teacher exists
+    const mentor = await Teacher.findOne({ email: mentorEmail });
+    if (!mentor) {
+      return res.status(400).json({ message: "Teacher with this email does not exist" });
+    }
+
+    // Create or get parent
+    let parent = await Parent.findOne({ email: parentEmail });
+    if (!parent) {
+      // Create parent if doesn't exist
+      parent = await Parent.create({
+        parentName,
+        email: parentEmail,
+        password: parentPassword,
+        phone: "",
+        studentRollNo: rollNo,
+        mentorName: mentor.name,
+      });
+    }
+
+    // Create student
+    const student = await Student.create({
+      name,
+      rollNo,
+      className,
+      parentName: parent.parentName,
+      mentorName: mentor.name,
+      presentDays: 0,
+      absentDays: 0,
+      marks: [],
+      attendance: [],
+    });
+
+    res.json({
+      message: "Student and parent created successfully",
+      student,
+      parentCredentials: {
+        email: parent.email,
+        password: parentPassword,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error adding student" });
+  }
+};
+
+// POST /admin/add-parent
+export const addParent = async (req, res) => {
+  try {
+    const { parentName, email, phone, password } = req.body;
+
+    if (!parentName || !email || !password) {
+      return res.status(400).json({ message: "Name, email, and password are required" });
+    }
+
+    // Check if parent already exists
+    const existingParent = await Parent.findOne({ email });
+    if (existingParent) {
+      return res.status(400).json({ message: "Parent with this email already exists" });
+    }
+
+    // Create parent
+    const parent = await Parent.create({
+      parentName,
+      email,
+      password,
+      phone: phone || "",
+      studentRollNo: "",
+      mentorName: "",
+    });
+
+    res.json({
+      message: "Parent added successfully",
+      parent: {
+        id: parent._id,
+        email: parent.email,
+        parentName: parent.parentName,
+      },
+      credentials: {
+        email: parent.email,
+        password: password,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error adding parent" });
+  }
+};
+
+// POST /admin/add-teacher
+export const addTeacher = async (req, res) => {
+  try {
+    const { name, email, subject, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email, and password are required" });
+    }
+
+    // Check if teacher already exists
+    const existingTeacher = await Teacher.findOne({ email });
+    if (existingTeacher) {
+      return res.status(400).json({ message: "Teacher with this email already exists" });
+    }
+
+    // Create teacher
+    const teacher = await Teacher.create({
+      name,
+      email,
+      password,
+      subject: subject || "",
+    });
+
+    res.json({
+      message: "Teacher added successfully",
+      teacher: {
+        id: teacher._id,
+        email: teacher.email,
+        name: teacher.name,
+      },
+      credentials: {
+        email: teacher.email,
+        password: password,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error adding teacher" });
+  }
+};
+
+// POST /admin/mark-attendance
+export const markAttendance = async (req, res) => {
+  try {
+    const { rollNo, date, status } = req.body;
+
+    if (!rollNo || !date || !status) {
+      return res.status(400).json({ message: "Roll number, date, and status are required" });
+    }
+
+    const student = await Student.findOne({ rollNo });
+    if (!student) {
+      return res.status(400).json({ message: "Student not found" });
+    }
+
+    // Check if attendance already exists for this date
+    const existingAttendance = student.attendance.find((att) => att.date === date);
+    
+    if (existingAttendance) {
+      // Update existing attendance
+      existingAttendance.status = status;
+    } else {
+      // Add new attendance
+      student.attendance.push({ date, status });
+    }
+
+    // Update present/absent counts
+    student.presentDays = student.attendance.filter((att) => att.status === "Present").length;
+    student.absentDays = student.attendance.filter((att) => att.status === "Absent").length;
+
+    await student.save();
+
+    res.json({
+      message: "Attendance marked successfully",
+      student,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error marking attendance" });
+  }
+};
+
+// POST /admin/add-marks
+export const addMarks = async (req, res) => {
+  try {
+    const { rollNo, subject, obtained, total } = req.body;
+
+    if (!rollNo || !subject || obtained === undefined || total === undefined) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+
+    const student = await Student.findOne({ rollNo });
+    if (!student) {
+      return res.status(400).json({ message: "Student not found" });
+    }
+
+    // Check if subject already exists
+    const existingMark = student.marks.find((m) => m.subject === subject);
+
+    if (existingMark) {
+      // Update existing marks
+      existingMark.obtained = obtained;
+      existingMark.total = total;
+    } else {
+      // Add new marks
+      student.marks.push({ subject, obtained, total });
+    }
+
+    await student.save();
+
+    res.json({
+      message: "Marks added successfully",
+      student,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error adding marks" });
+  }
+};
+
+// GET /admin/teachers
+export const getAllTeachers = async (req, res) => {
+  try {
+    const teachers = await Teacher.find({}, { name: 1, email: 1, subject: 1 });
+    res.json(teachers);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching teachers" });
+  }
+};
+
+// GET /admin/students
+export const getAllStudents = async (req, res) => {
+  try {
+    const students = await Student.find();
+    
+    // Get parent details for each student
+    const studentsWithParents = await Promise.all(
+      students.map(async (student) => {
+        const parent = await Parent.findOne({ studentRollNo: student.rollNo });
+        return {
+          ...student.toObject(),
+          parentEmail: parent?.email || "",
+          parentPassword: parent?.password || "",
+        };
+      })
+    );
+    
+    res.json(studentsWithParents);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching students" });
+  }
+};
+
+// For now, simple placeholder endpoints for upload buttons
+
+// POST /admin/upload/students
+export const uploadStudents = async (req, res) => {
+  // You can parse CSV/Excel here later
+  res.json({ message: "Student upload API coming soon" });
+};
+
+// POST /admin/upload/parents
+export const uploadParents = async (req, res) => {
+  res.json({ message: "Parent upload API coming soon" });
+};
+
+// POST /admin/upload/teachers
+export const uploadTeachers = async (req, res) => {
+  res.json({ message: "Teacher upload API coming soon" });
+};
