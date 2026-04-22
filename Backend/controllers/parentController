@@ -1,0 +1,257 @@
+import Student from "../models/Student.js";
+import Parent from "../models/Parent.js";
+import CalendarDay from "../models/CalendarDay.js";
+import Complaint from "../models/Complaint.js";
+import ParentTeacherMessage from "../models/ParentTeacherMessage.js";
+import TeacherParentMessage from "../models/TeacherParentMessage.js";
+import Teacher from "../models/Teacher.js";
+
+// --- Parent side APIs ---
+
+// POST /parent/auth/login
+export const loginParent = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    // Find parent by email
+    const parent = await Parent.findOne({ email });
+    
+    if (!parent) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    // Check password (plain text for now - in production, use bcrypt)
+    if (parent.password !== password) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    // Generate a simple token (in production, use JWT)
+    const token = `parent_${parent._id}_${Date.now()}`;
+
+    res.json({
+      message: "Login successful",
+      token,
+      parent: {
+        id: parent._id,
+        email: parent.email,
+        parentName: parent.parentName,
+        studentRollNo: parent.studentRollNo,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error during login" });
+  }
+};
+
+// GET /parent/student/details
+export const getStudentDetails = async (req, res) => {
+  try {
+    const parentEmail = req.query.email;
+    
+    if (!parentEmail) {
+      // Fallback to demo data if no email provided
+      const { student } = await getCurrentParentContext();
+      return res.json({
+        name: student.name,
+        rollNo: student.rollNo,
+        className: student.className,
+        parentName: student.parentName,
+        mentorName: student.mentorName,
+        presentDays: student.presentDays,
+        absentDays: student.absentDays,
+      });
+    }
+
+    // Find parent by email
+    const parent = await Parent.findOne({ email: parentEmail });
+    if (!parent) {
+      return res.status(404).json({ message: "Parent not found" });
+    }
+
+    // Find student by rollNo
+    const student = await Student.findOne({ rollNo: parent.studentRollNo });
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    res.json({
+      name: student.name,
+      rollNo: student.rollNo,
+      className: student.className,
+      parentName: student.parentName,
+      mentorName: student.mentorName,
+      presentDays: student.presentDays,
+      absentDays: student.absentDays,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching student details" });
+  }
+};
+
+// GET /parent/student/marks
+export const getStudentMarks = async (req, res) => {
+  try {
+    const parentEmail = req.query.email;
+    
+    if (!parentEmail) {
+      const { student } = await getCurrentParentContext();
+      return res.json(student.marks || []);
+    }
+
+    const parent = await Parent.findOne({ email: parentEmail });
+    if (!parent) {
+      return res.status(404).json({ message: "Parent not found" });
+    }
+
+    const student = await Student.findOne({ rollNo: parent.studentRollNo });
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    res.json(student.marks || []);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching marks" });
+  }
+};
+
+// GET /parent/student/attendance
+export const getStudentAttendance = async (req, res) => {
+  try {
+    const parentEmail = req.query.email;
+    
+    if (!parentEmail) {
+      const { student } = await getCurrentParentContext();
+      return res.json(student.attendance || []);
+    }
+
+    const parent = await Parent.findOne({ email: parentEmail });
+    if (!parent) {
+      return res.status(404).json({ message: "Parent not found" });
+    }
+
+    const student = await Student.findOne({ rollNo: parent.studentRollNo });
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    res.json(student.attendance || []);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching attendance" });
+  }
+};
+
+// GET /parent/calendar
+export const getCalendar = async (req, res) => {
+  try {
+    let days = await CalendarDay.find().sort({ date: 1 });
+    if (days.length === 0) {
+      days = await CalendarDay.insertMany([
+        { date: "2024-12-01", status: "Working" },
+        { date: "2024-12-02", status: "Working" },
+        { date: "2024-12-03", status: "Holiday" },
+      ]);
+    }
+    res.json(days);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching calendar" });
+  }
+};
+
+// POST /parent/complaint  { message, parentEmail }
+export const sendComplaint = async (req, res) => {
+  try {
+    const { message, parentEmail } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ message: "Message is required" });
+    }
+    if (!parentEmail) {
+      return res.status(400).json({ message: "Parent email is required" });
+    }
+    
+    const parent = await Parent.findOne({ email: parentEmail });
+    if (!parent) {
+      return res.status(404).json({ message: "Parent not found" });
+    }
+    
+    const student = await Student.findOne({ rollNo: parent.studentRollNo });
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+    
+    const complaint = await Complaint.create({
+      rollNo: student.rollNo,
+      parentName: parent.parentName,
+      mentorName: parent.mentorName,
+      message,
+    });
+    res.json({ message: "Complaint sent", complaint });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error sending complaint" });
+  }
+};
+
+// POST /parent/message/send  { teacherId, message, parentEmail }
+export const sendMessageToTeacher = async (req, res) => {
+  try {
+    const { teacherId, message, parentEmail } = req.body;
+    if (!teacherId || !message || !message.trim()) {
+      return res.status(400).json({ message: "Teacher and message required" });
+    }
+    if (!parentEmail) {
+      return res.status(400).json({ message: "Parent email is required" });
+    }
+    
+    const parent = await Parent.findOne({ email: parentEmail });
+    if (!parent) {
+      return res.status(404).json({ message: "Parent not found" });
+    }
+    
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(400).json({ message: "Teacher not found" });
+    }
+    const msg = await ParentTeacherMessage.create({
+      parentName: parent.parentName,
+      teacherId: teacher._id,
+      message,
+    });
+    res.json({ message: "Message sent to teacher", data: msg });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error sending message to teacher" });
+  }
+};
+
+// GET /parent/reasons
+export const getTeacherReasons = async (req, res) => {
+  try {
+    const parentEmail = req.query.email;
+    
+    if (!parentEmail) {
+      return res.status(400).json({ message: "Parent email is required" });
+    }
+    
+    const parent = await Parent.findOne({ email: parentEmail });
+    if (!parent) {
+      return res.status(404).json({ message: "Parent not found" });
+    }
+    
+    const msgs = await TeacherParentMessage.find({ parentName: parent.parentName })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json(msgs);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching teacher reasons" });
+  }
+};
