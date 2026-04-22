@@ -1,0 +1,126 @@
+import Student from "../models/Student.js";
+import Parent from "../models/Parent.js";
+import TeacherParentMessage from "../models/TeacherParentMessage.js";
+import Teacher from "../models/Teacher.js";
+
+export const loginTeacher = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    const teacher = await Teacher.findOne({ email });
+    
+    if (!teacher) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    if (teacher.password !== password) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    const token = `teacher_${teacher._id}_${Date.now()}`;
+
+    res.json({
+      message: "Login successful",
+      token,
+      teacher: {
+        id: teacher._id,
+        email: teacher.email,
+        name: teacher.name,
+        subject: teacher.subject,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error during login" });
+  }
+};
+
+export const getMentees = async (req, res) => {
+  try {
+    const teacherEmail = req.query.email;
+    
+    if (!teacherEmail) {
+      return res.status(400).json({ message: "Teacher email is required" });
+    }
+
+    const teacher = await Teacher.findOne({ email: teacherEmail });
+    
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+    const mentees = await Student.find({ mentorName: teacher.name });
+    const menteesWithStats = mentees.map(student => {
+      const totalDays = student.presentDays + student.absentDays;
+      const attendancePercentage = totalDays > 0 
+        ? ((student.presentDays / totalDays) * 100).toFixed(2)
+        : 0;
+
+      return {
+        _id: student._id,
+        name: student.name,
+        rollNo: student.rollNo,
+        className: student.className,
+        parentName: student.parentName,
+        presentDays: student.presentDays,
+        absentDays: student.absentDays,
+        attendancePercentage,
+        marks: student.marks,
+      };
+    });
+
+    res.json(menteesWithStats);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching mentees" });
+  }
+};
+export const getTeacherStudents = async (req, res) => {
+  try {
+    const students = await Student.find().sort({ rollNo: 1 });
+    res.json(students);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching students" });
+  }
+};
+export const sendMessageToParent = async (req, res) => {
+  try {
+    const { rollNo, message } = req.body;
+    if (!rollNo || !message || !message.trim()) {
+      return res.status(400).json({ message: "Roll number and message required" });
+    }
+    
+    const student = await Student.findOne({ rollNo });
+    if (!student) {
+      return res.status(400).json({ message: "Student not found" });
+    }
+    const parent = await Parent.findOne({ studentRollNo: rollNo });
+    if (!parent) {
+      return res.status(400).json({ message: "Parent not found for this student" });
+    }
+
+    const msg = await TeacherParentMessage.create({
+      rollNo,
+      parentName: parent.parentName,
+      message,
+    });
+
+    res.json({ message: "Message sent to parent", data: msg });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error sending message to parent" });
+  }
+};
+export const getTeachersList = async (req, res) => {
+  try {
+    const teachers = await Teacher.find().select("name subject");
+    res.json(teachers);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error fetching teachers" });
+  }
+};
